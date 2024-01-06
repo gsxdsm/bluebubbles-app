@@ -49,7 +49,7 @@ import 'package:universal_io/io.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:windows_taskbar/windows_taskbar.dart';
 
-const databaseVersion = 4;
+const databaseVersion = 5;
 late final Store store;
 late final Box<Attachment> attachmentBox;
 late final Box<Chat> chatBox;
@@ -325,6 +325,18 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
               ss.getFcmData();
               ss.fcmData.save();
               version = 4;
+              migrate.call();
+              return;
+            // Version 5 finds missing dbOnlyLatestMessageDates and updates in the db
+            case 5:
+              final chats = chatBox.getAll();
+              for (Chat c in chats) {
+                //Check if we don't have the latest message date and re-calculate (on save)
+                if (c.dbOnlyLatestMessageDate == null){
+                  c.save();
+                }
+              }
+              version = 5;
               migrate.call();
               return;
             default:
