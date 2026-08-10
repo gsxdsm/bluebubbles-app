@@ -163,6 +163,30 @@ class MethodChannelActions {
     });
   }
 
+  /// Mirrors the visible conversation into Android's content capture subsystem so
+  /// the OEM intelligence service can offer keyboard reply suggestions. Flutter
+  /// paints to a single surface, so the framework's automatic integration sees
+  /// nothing — the Kotlin side synthesizes a virtual view tree from this payload.
+  ///
+  /// Only has an effect when the running build's package is on the intelligence
+  /// service's allowlist (see the `smartsuggest` product flavor). Silently a no-op
+  /// otherwise, so callers do not need to feature-detect.
+  Future<void> updateContentCapture({
+    required String chatGuid,
+    required List<Map<String, dynamic>> messages,
+  }) async {
+    await service.invokeMethod('update-content-capture', {
+      'chat_guid': chatGuid,
+      'messages': messages,
+    });
+  }
+
+  /// Retracts the virtual view tree when the user leaves a conversation, so the
+  /// service does not keep suggesting replies for a thread that is no longer open.
+  Future<void> clearContentCapture() async {
+    await service.invokeMethod('clear-content-capture');
+  }
+
   Future<void> saveFileToDownloads({
     required String filePath,
     required String fileName,

@@ -39,8 +39,18 @@ class FirebaseDatabaseService extends GetxService {
     return null;
   }
 
+  /// Google Sign-In authorizes an Android app by matching its package name and signing
+  /// certificate against an OAuth client in the *client ID's own* Google Cloud project.
+  /// The default below lives in the official BlueBubbles project, so a build with a
+  /// different applicationId or signing key (any self-built flavor) is rejected with
+  /// DEVELOPER_ERROR. Such builds must supply a client ID from a project where their own
+  /// package + SHA-1 is registered:
+  ///   flutter build apk --flavor alpha --dart-define=OAUTH_SERVER_CLIENT_ID=<web client id>
+  static const _serverClientIdOverride = String.fromEnvironment('OAUTH_SERVER_CLIENT_ID');
+
   String? getServerClientId() {
     if (!kIsWeb && io.Platform.isAndroid) {
+      if (_serverClientIdOverride.isNotEmpty) return _serverClientIdOverride;
       return '500464701389-8trcdkcj7ni5l4dn6n7l795rhb1asnh3.apps.googleusercontent.com';
     }
     return null;

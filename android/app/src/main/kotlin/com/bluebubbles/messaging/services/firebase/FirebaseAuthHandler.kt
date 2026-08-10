@@ -1,6 +1,7 @@
 package com.bluebubbles.messaging.services.firebase
 
 import android.content.Context
+import com.bluebubbles.messaging.BuildConfig
 import com.bluebubbles.messaging.Constants
 import com.bluebubbles.messaging.models.MethodCallHandlerImpl
 import com.bluebubbles.messaging.utils.PersistentLog
@@ -31,7 +32,15 @@ class FirebaseAuthHandler: MethodCallHandlerImpl() {
         val apiKey: String = prefs.getString("apiKey", null)!!
         val databaseUrl: String? = prefs.getString("firebaseURL", null)
         val gcmSenderId: String? = prefs.getString("clientID", null)
-        val applicationId: String = prefs.getString("applicationID", null)!!
+        // The server hands out the production package's Firebase app ID. A flavor with a
+        // different applicationId must present its own, or FCM refuses to register the
+        // device because the app ID's package doesn't match the caller's. Configure via
+        // `fcm.appId.<flavor>` in local.properties; empty means use the server's value.
+        val serverApplicationId: String = prefs.getString("applicationID", null)!!
+        val applicationId: String = BuildConfig.FCM_APP_ID_OVERRIDE.ifEmpty { serverApplicationId }
+        if (applicationId != serverApplicationId) {
+            PersistentLog.d(context, Constants.logTag, "Overriding server Firebase app ID $serverApplicationId with build-configured $applicationId")
+        }
 
         // Don't auth multiple times, unless the stored config no longer matches what the
         // existing FirebaseApp was initialized with (e.g. the user pointed at a different

@@ -197,6 +197,7 @@ class MessagesViewState extends State<MessagesView> with MessagesServiceMixin, T
       if (!(_messages.firstOrNull?.isFromMe ?? true)) {
         updateReplies();
       }
+      _updateContentCapture();
       if (SettingsSvc.settings.scrollToLastUnread.value && chat.lastReadMessageGuid != null) {
         Future.delayed(const Duration(milliseconds: 100), () {
           if (!mounted) return;
@@ -236,6 +237,12 @@ class MessagesViewState extends State<MessagesView> with MessagesServiceMixin, T
       force: widget.customService == null,
       onlyDetach: widget.customService != null,
     );
+
+    // Retract the mirrored thread so the keyboard stops suggesting replies for a
+    // conversation the user has left.
+    if (!kIsWeb && !kIsDesktop) {
+      unawaited(MethodChannelSvc.actions.clearContentCapture());
+    }
 
     // Controllers are now disposed by MessagesService.onClose()
     _setStateDebouncer?.cancel();
@@ -314,6 +321,31 @@ class MessagesViewState extends State<MessagesView> with MessagesServiceMixin, T
     } else {
       showSnackbar("Error", "Failed to find message!");
     }
+  }
+
+  /// Push the tail of this thread to the OS so the system keyboard can offer
+  /// reply suggestions. Independent of [smartRepliesEnabled] — that setting
+  /// governs BlueBubbles' own in-app suggestion row, not the OS integration.
+  void _updateContentCapture() {
+    if (kIsWeb || kIsDesktop || isNullOrEmpty(_messages) || !mounted) return;
+
+    // Mirrors the window the OS-side services use; more context than this is
+    // discarded by the suggestion model anyway, and every message crosses the
+    // method channel on each new message.
+    final recent = _messages
+        .where((m) => !isNullOrEmpty(m.fullText) && m.dateCreated != null)
+        .take(10)
+        .toList()
+        .reversed
+        .map((m) => <String, dynamic>{
+              'text': m.fullText,
+              'is_from_me': m.isFromMe ?? false,
+              'sender': (m.isFromMe ?? false) ? null : m.handle?.displayName,
+            })
+        .toList();
+    if (recent.isEmpty) return;
+
+    unawaited(MethodChannelSvc.actions.updateContentCapture(chatGuid: chat.guid, messages: recent));
   }
 
   void updateReplies({bool updateConversation = true}) async {
@@ -485,6 +517,8 @@ class MessagesViewState extends State<MessagesView> with MessagesServiceMixin, T
         updateReplies(updateConversation: false);
       }
     }
+
+    if (insertIndex == 0) _updateContentCapture();
 
     if (insertIndex == 0 && !message.isFromMe! && SettingsSvc.settings.receiveSoundPath.value != null) {
       if (kIsDesktop && (ChatsSvc.getChatState(chat.guid)?.isActive.value ?? false)) {

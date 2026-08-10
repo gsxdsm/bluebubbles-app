@@ -5,6 +5,7 @@ import android.util.Log
 import com.bluebubbles.messaging.Constants
 import com.bluebubbles.messaging.utils.PersistentLog
 import com.bluebubbles.messaging.MainActivity
+import com.bluebubbles.messaging.services.contentcapture.ContentCaptureHandler
 import com.bluebubbles.messaging.services.filesystem.GetContentUriPathHandler
 import com.bluebubbles.messaging.services.firebase.FirebaseAuthHandler
 import com.bluebubbles.messaging.services.firebase.FirebaseDeleteTokenHandler
@@ -66,6 +67,8 @@ class MethodCallHandler {
             DeleteNotificationHandler.tag,
             StartForegroundServiceHandler.tag,
             StopForegroundServiceHandler.tag,
+            ContentCaptureHandler.updateTag,
+            ContentCaptureHandler.clearTag,
         )
 
         fun setNotificationListenerResult(result: MethodChannel.Result) {
@@ -130,6 +133,8 @@ class MethodCallHandler {
             DeleteNotificationHandler.tag -> DeleteNotificationHandler().handleMethodCall(call, result, context)
             StartForegroundServiceHandler.tag -> StartForegroundServiceHandler().handleMethodCall(call, result, context)
             StopForegroundServiceHandler.tag -> StopForegroundServiceHandler().handleMethodCall(call, result, context)
+            ContentCaptureHandler.updateTag -> ContentCaptureHandler().handleMethodCall(call, result, context)
+            ContentCaptureHandler.clearTag -> ContentCaptureHandler().handleMethodCall(call, result, context)
             else -> {
                 val error = "Could not find method call handler for ${call.method}!"
                 PersistentLog.d(context, Constants.logTag, error)
