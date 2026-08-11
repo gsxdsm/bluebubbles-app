@@ -365,16 +365,23 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
     unawaited(_ensureKeyboardShown());
   }
 
-  /// Keeps asking the platform for the keyboard until it is actually on screen.
+  /// Nudges the platform for the keyboard a few times to cover cold-start churn, then
+  /// stops.
   ///
   /// A single show request is unreliable during startup: the engine tears down and
-  /// re-creates its input connection several times, and a request that lands in one
-  /// of those gaps is dropped without any error. Retrying blindly a fixed number of
-  /// times still loses the race intermittently, so poll until the keyboard reports
-  /// itself visible via the bottom view inset and stop as soon as it does.
+  /// re-creates its input connection several times, and a request that lands in one of
+  /// those gaps is dropped without any error. So retry briefly — but only briefly.
+  ///
+  /// The retry window MUST stay short. In split-screen / multi-window (common on the
+  /// Fold) the IME doesn't resize this window, so neither `viewInsets.bottom` nor
+  /// `KeyboardVisibilityController` ever report the keyboard as visible — the loop can't
+  /// detect success and would run to its full length. Every `TextInput.show` it fires
+  /// after the user has dismissed the keyboard re-raises it, so a long loop makes Back
+  /// appear broken (dismiss → instantly pops back up). Keeping the window to ~1s means
+  /// the retries finish before the user reads and dismisses, so a dismissal sticks.
   Future<void> _ensureKeyboardShown() async {
-    const interval = Duration(milliseconds: 400);
-    const maxAttempts = 12; // ~5s, well past the startup churn
+    const interval = Duration(milliseconds: 250);
+    const maxAttempts = 4; // ~1s — long enough for cold-start churn, short enough not to fight a dismiss
 
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       await Future.delayed(interval);
@@ -385,7 +392,10 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
       if (!controller.focusNode.hasFocus) return;
       if (controller.showingOverlays || controller.showingSubRoute) return;
 
-      if (MediaQuery.of(context).viewInsets.bottom > 0) {
+      // Stop as soon as the keyboard is known to be up. `keyboardOpen` is driven by
+      // KeyboardVisibilityController and is the signal that works when the window does
+      // resize; `viewInsets` is the fallback for contexts that still see the inset.
+      if (controller.keyboardOpen || MediaQuery.of(context).viewInsets.bottom > 0) {
         Logger.debug('Composer keyboard visible after $attempt attempt(s)', tag: 'ConversationTextField');
         return; // keyboard is up — done
       }
