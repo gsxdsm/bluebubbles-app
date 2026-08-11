@@ -342,9 +342,6 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
   /// per visited chat and a dismissal sticks. Explicit re-focus requests (re-entering from
   /// a shortcut, app resume) still go through focusComposerAndShowKeyboard directly.
   void _autoFocusWhenSettled() {
-    Logger.info(
-        'autoFocus chat=$chatGuid active=${ChatsSvc.activeChatGuid.value} last=$_lastAutoFocusedChatGuid',
-        tag: 'KbdDismiss');
     // Only the active (foreground) chat's composer may auto-open. A previous chat's view
     // can stay mounted during navigation, and its composer would otherwise fight the
     // active one for the keyboard — each recreation re-grabbing focus — so the keyboard
@@ -363,7 +360,6 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
   /// already-open conversation, where this widget is never rebuilt.
   void focusComposerAndShowKeyboard() {
     if (!mounted) return;
-    Logger.info('focusComposer chat=$chatGuid by:\n${StackTrace.current}', tag: 'KbdDismiss');
     _lastAutoFocusedChatGuid = chatGuid;
     controller.focusNode.requestFocus();
     unawaited(_ensureKeyboardShown());

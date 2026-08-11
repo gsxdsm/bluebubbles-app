@@ -6,7 +6,6 @@ import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/backend/interfaces/prefs_interface.dart';
 import 'package:bluebubbles/services/services.dart';
-import 'package:bluebubbles/utils/logger/logger.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
 import 'package:get/get.dart';
@@ -117,6 +116,7 @@ class ConversationViewController extends StatefulController with GetSingleTicker
 
   bool keyboardOpen = false;
   double _keyboardOffset = 0;
+  StreamSubscription<bool>? _keyboardSub;
   Timer? _scrollDownDebounce;
   Future<void> Function(SendData)? sendFunc;
 
@@ -164,15 +164,27 @@ class ConversationViewController extends StatefulController with GetSingleTicker
     super.onInit();
 
     textController.mentionables = mentionables;
-    KeyboardVisibilityController().onChange.listen((bool visible) async {
+    _keyboardSub = KeyboardVisibilityController().onChange.listen((bool visible) async {
+      final wasOpen = keyboardOpen;
       keyboardOpen = visible;
       if (scrollController.hasClients && scrollController.positions.length == 1) {
         _keyboardOffset = scrollController.offset;
       }
-      Logger.info(
-          'KBD visible=$visible chat=${chat.guid} active=${ChatsSvc.activeChatGuid.value} '
-          'msgFocus=${focusNode.hasFocus} subjFocus=${subjectFocusNode.hasFocus}',
-          tag: 'KbdDismiss');
+
+      // When the user dismisses the keyboard (e.g. the Android Back button), release the
+      // composer's focus. Otherwise the still-focused field makes the Flutter engine
+      // immediately re-raise the keyboard (flutter#52599) and Back appears to do nothing.
+      // Android's IME swallows that Back before any PopScope handler runs, so this
+      // visibility transition is the only place we can catch the dismissal.
+      //
+      // Guarded to a genuine open→closed transition on the foreground chat: the initial
+      // `false` emitted on subscribe isn't a dismissal (so entry auto-open is untouched),
+      // and only the active chat's composer should react (a backgrounded chat's leaked
+      // controller must not steal focus handling from the visible one).
+      if (wasOpen && !visible && ChatsSvc.activeChatGuid.value == chat.guid) {
+        if (focusNode.hasFocus) focusNode.unfocus();
+        if (subjectFocusNode.hasFocus) subjectFocusNode.unfocus();
+      }
     });
 
     scrollController.addListener(() {
@@ -214,6 +226,7 @@ class ConversationViewController extends StatefulController with GetSingleTicker
   @override
   void onClose() {
     messageListGate.dispose();
+    unawaited(_keyboardSub?.cancel());
     updateSmartReplyLayout(visible: false, height: 0);
     for (PlayerController a in audioPlayers.values) {
       a.pausePlayer();
