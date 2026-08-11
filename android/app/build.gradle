@@ -38,6 +38,7 @@ if (System.getenv('BB_REQUIRE_RELEASE_SIGNING') == 'true' && !hasReleaseKeystore
 // Register `com.bluebubbles.messaging.alpha` as an Android app in the same Firebase
 // project, then set:  fcm.appId.alpha=1:<project number>:android:<hash>
 def fcmAppIdAlpha = localProperties.getProperty('fcm.appId.alpha') ?: ''
+def fcmAppIdSmartsuggest = localProperties.getProperty('fcm.appId.smartsuggest') ?: ''
 
 def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
 if (flutterVersionCode == null) {
@@ -150,18 +151,29 @@ android {
             resValue "string", "file_provider", "com.bluebubbles.messaging.beta.fileprovider"
             applicationId "com.bluebubbles.messaging.beta"
         }
-        // Takes over the package name of the (now-removed) Samsung Messages app,
-        // which One UI's SmartSuggestions service allowlists for content capture as
-        // a *whole package* — unlike most entries, which are pinned to a specific
-        // activity component. Without this the reply-suggestion pipeline never
-        // opens a capture session for us. Sideload only; cannot ship to Play.
-        // Verify with: adb shell dumpsys content_capture | grep -A2 Whitelist
+        // Impersonates WhatsApp Business so One UI's SmartSuggestions service opens a
+        // content capture session AND treats the screen as a conversation.
+        //
+        // Decompiling com.samsung.android.smartsuggestions showed two independent gates
+        // that use the activity component: the content-capture allowlist (which activity
+        // opens a session) and the reply parser (which activity counts as a chatroom,
+        // per Constants.ACTIVITY_NAMES). They must be the SAME component. For WhatsApp
+        // Business both are `com.whatsapp.w4b/com.whatsapp.Conversation`, so a single
+        // activity satisfies both — see the launcher in src/smartsuggest.
+        //
+        // Signal was the original target and cannot work: its allowlist entry is
+        // MainActivity/RoutingActivity but its parser gate is ConversationActivity, so no
+        // single activity passes both. w4b is chosen over com.whatsapp because the real
+        // WhatsApp is installed here and would collide; w4b is not. Requires WhatsApp
+        // Business not be installed. Sideload only.
+        // Verify with: adb shell dumpsys content_capture | grep -A20 Whitelist
         smartsuggest {
             dimension "app"
             resValue "string", "app_name_en", "BlueBubbles (SmartSuggest)"
             resValue "color", "ic_launcher_background", "#4990de"
-            resValue "string", "file_provider", "com.samsung.android.messaging.fileprovider"
-            applicationId "com.samsung.android.messaging"
+            resValue "string", "file_provider", "com.whatsapp.w4b.fileprovider"
+            applicationId "com.whatsapp.w4b"
+            buildConfigField "String", "FCM_APP_ID_OVERRIDE", "\"${fcmAppIdSmartsuggest}\""
         }
         prod {
             getIsDefault().set(true)

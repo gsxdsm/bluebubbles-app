@@ -46,6 +46,15 @@ class ConversationTextField extends CustomStateful<ConversationViewController> {
 
 class ConversationTextFieldState extends CustomState<ConversationTextField, void, ConversationViewController>
     with TickerProviderStateMixin {
+  /// The chat whose composer last auto-opened the keyboard. Tracked statically because
+  /// both the composer's State and its ConversationViewController are recreated while a
+  /// chat stays open (e.g. every time the view insets change when the user dismisses the
+  /// keyboard), so any per-widget or per-controller flag resets and the auto-open re-fires
+  /// — the keyboard "keeps coming back". A static value survives those recreations, so the
+  /// auto-open fires once per *visited* chat and a dismissal sticks. It updates whenever a
+  /// different chat is viewed, so returning to a chat later re-opens as expected.
+  static String? _lastAutoFocusedChatGuid;
+
   final recorderController = kIsWeb ? null : RecorderController();
   final localController = ConversationTextFieldLocalController();
   final _emojiScrollController = ScrollController();
@@ -325,8 +334,26 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
   /// [StartupTasks], see https://github.com/flutter/flutter/issues/52599.
   ///
   /// So ask for the keyboard explicitly once the connection has settled.
+  ///
+  /// This runs from initState. Both this widget's State and its controller are recreated
+  /// while a chat stays open (view-inset changes recreate them), so a per-widget or
+  /// per-controller flag can't stop the auto-open from re-firing after the user dismisses
+  /// the keyboard. [_lastAutoFocusedChatGuid] is static, so the automatic open fires once
+  /// per visited chat and a dismissal sticks. Explicit re-focus requests (re-entering from
+  /// a shortcut, app resume) still go through focusComposerAndShowKeyboard directly.
   void _autoFocusWhenSettled() {
+    Logger.info(
+        'autoFocus chat=$chatGuid active=${ChatsSvc.activeChatGuid.value} last=$_lastAutoFocusedChatGuid',
+        tag: 'KbdDismiss');
+    // Only the active (foreground) chat's composer may auto-open. A previous chat's view
+    // can stay mounted during navigation, and its composer would otherwise fight the
+    // active one for the keyboard — each recreation re-grabbing focus — so the keyboard
+    // ping-pongs and never stays dismissed.
+    if (ChatsSvc.activeChatGuid.value != chatGuid) return;
+    if (_lastAutoFocusedChatGuid == chatGuid) return; // already auto-opened this chat
+    _lastAutoFocusedChatGuid = chatGuid;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ChatsSvc.activeChatGuid.value != chatGuid) return;
       focusComposerAndShowKeyboard();
     });
   }
@@ -336,6 +363,8 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
   /// already-open conversation, where this widget is never rebuilt.
   void focusComposerAndShowKeyboard() {
     if (!mounted) return;
+    Logger.info('focusComposer chat=$chatGuid by:\n${StackTrace.current}', tag: 'KbdDismiss');
+    _lastAutoFocusedChatGuid = chatGuid;
     controller.focusNode.requestFocus();
     unawaited(_ensureKeyboardShown());
   }
@@ -356,20 +385,17 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
       if (!mounted) return;
 
       // Stop if the composer no longer owns focus — the user may have navigated
-      // away, or an overlay/sub-route may have taken over. Continuing here would
-      // fight whatever took over.
+      // away, or an overlay/sub-route may have taken over.
       if (!controller.focusNode.hasFocus) return;
       if (controller.showingOverlays || controller.showingSubRoute) return;
 
       if (MediaQuery.of(context).viewInsets.bottom > 0) {
         Logger.debug('Composer keyboard visible after $attempt attempt(s)', tag: 'ConversationTextField');
-        return;
+        return; // keyboard is up — done
       }
 
       SystemChannels.textInput.invokeMethod('TextInput.show');
     }
-
-    Logger.warn('Composer keyboard never appeared after $maxAttempts attempts', tag: 'ConversationTextField');
   }
 
   @override

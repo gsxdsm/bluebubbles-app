@@ -345,7 +345,8 @@ class MessagesViewState extends State<MessagesView> with MessagesServiceMixin, T
         .toList();
     if (recent.isEmpty) return;
 
-    unawaited(MethodChannelSvc.actions.updateContentCapture(chatGuid: chat.guid, messages: recent));
+    unawaited(MethodChannelSvc.actions
+        .updateContentCapture(chatGuid: chat.guid, title: chat.getTitle(), messages: recent));
   }
 
   void updateReplies({bool updateConversation = true}) async {

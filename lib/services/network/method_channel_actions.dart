@@ -173,10 +173,12 @@ class MethodChannelActions {
   /// otherwise, so callers do not need to feature-detect.
   Future<void> updateContentCapture({
     required String chatGuid,
+    required String? title,
     required List<Map<String, dynamic>> messages,
   }) async {
     await service.invokeMethod('update-content-capture', {
       'chat_guid': chatGuid,
+      'title': title,
       'messages': messages,
     });
   }

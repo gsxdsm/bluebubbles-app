@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Flavor manifest for `smartsuggest`.
+
+  Decompiling com.samsung.android.smartsuggestions showed the reply-suggestion feature
+  applies two independent gates keyed on the foreground activity component, and both must
+  be the SAME component:
+
+    1. Content-capture allowlist (which activity opens a capture session). Live entry for
+       WhatsApp Business: com.whatsapp.w4b/com.whatsapp.Conversation.
+    2. Reply parser (deepscreencapture/ScreenContentManager → smartreply), which only
+       treats a screen as a chatroom when the activity equals that app's conversation
+       activity — Constants.ACTIVITY_NAMES.WHATSAPP_CONVERSATION_ACTIVITY =
+       "com.whatsapp.Conversation".
+
+  Both are com.whatsapp.Conversation, so one launcher activity satisfies both. (Signal, the
+  first target, has these on different activities — allowlist MainActivity vs parser
+  ConversationActivity — so it opened a session but was never parsed as a conversation.)
+
+  See ContentCaptureHandler for the virtual view tree that carries the messages.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <!-- The component both gates check. Subclasses the real MainActivity, so behaviour
+             is unchanged; only the class name differs. -->
+        <activity
+            android:name="com.whatsapp.Conversation"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:launchMode="singleTask"
+            android:theme="@style/LaunchTheme"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true"
+            android:resizeableActivity="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Strip the launcher entry from the original activity so there is a single icon
+             that lands on com.whatsapp.Conversation. Stays declared + exported for shortcuts
+             and share targets, which address it by component. -->
+        <activity android:name="com.bluebubbles.messaging.MainActivity">
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

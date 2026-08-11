@@ -3,6 +3,7 @@ package com.bluebubbles.messaging.services.system
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.Person
+import androidx.core.content.LocusIdCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import com.bluebubbles.messaging.Constants
@@ -36,10 +37,20 @@ class PushShareTargetsHandler: MethodCallHandlerImpl() {
 
         PersistentLog.d(context, Constants.logTag, "Creating intent for shortcut with name $name")
         val contactCategories = setOf(Constants.categoryTextShareTarget)
-        val launcherIntent = Intent(context, MainActivity::class.java)
+        // Target the package's real launcher activity rather than MainActivity by class.
+        // For most flavors these are the same, but the `smartsuggest` flavor's launcher is
+        // a differently-named subclass (com.whatsapp.Conversation) so One UI's content
+        // capture allowlist opens a session for it. A shortcut hardcoded to MainActivity
+        // would land on the non-allowlisted component and get no keyboard suggestions.
+        val launcherComponent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.component
+        val launcherIntent = Intent(Intent.ACTION_DEFAULT)
             .putExtra("chatGuid", guid)
             .putExtra("bubble", false)
-            .setAction(Intent.ACTION_DEFAULT)
+        if (launcherComponent != null) {
+            launcherIntent.component = launcherComponent
+        } else {
+            launcherIntent.setClass(context, MainActivity::class.java)
+        }
         val person = Person.Builder().setName(name)
         if (adaptiveIcon != null) {
             person.setIcon(adaptiveIcon)
@@ -52,6 +63,10 @@ class PushShareTargetsHandler: MethodCallHandlerImpl() {
             .setCategories(contactCategories)
             .setLongLived(true)
             .setIsConversation()
+            // Ties this shortcut to the same locus the conversation view reports to the
+            // content capture subsystem (see ContentCaptureHandler), which is how the
+            // system correlates "the screen being captured" with "this conversation".
+            .setLocusId(LocusIdCompat(guid))
             .setPerson(person.build())
         if (adaptiveIcon != null) {
             shortcut.setIcon(adaptiveIcon)

@@ -13,7 +13,10 @@ import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterFragmentActivity() {
+// `open` so a product flavor can subclass it under a different fully-qualified name.
+// One UI's SmartSuggestions service allowlists content capture per activity component,
+// not just per package, so the running activity's class name has to match an entry.
+open class MainActivity : FlutterFragmentActivity() {
     companion object {
         private val engineLock = Any()
         @Volatile private var _engine: FlutterEngine? = null

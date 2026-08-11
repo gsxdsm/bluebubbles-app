@@ -6,6 +6,7 @@ import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/backend/interfaces/prefs_interface.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:bluebubbles/utils/logger/logger.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
 import 'package:get/get.dart';
@@ -168,6 +169,10 @@ class ConversationViewController extends StatefulController with GetSingleTicker
       if (scrollController.hasClients && scrollController.positions.length == 1) {
         _keyboardOffset = scrollController.offset;
       }
+      Logger.info(
+          'KBD visible=$visible chat=${chat.guid} active=${ChatsSvc.activeChatGuid.value} '
+          'msgFocus=${focusNode.hasFocus} subjFocus=${subjectFocusNode.hasFocus}',
+          tag: 'KbdDismiss');
     });
 
     scrollController.addListener(() {

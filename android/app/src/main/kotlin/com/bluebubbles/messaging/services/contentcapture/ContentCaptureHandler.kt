@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.LocusId
 import android.os.Build
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewStructure
 import android.view.autofill.AutofillId
 import android.view.contentcapture.ContentCaptureContext
@@ -44,13 +45,41 @@ class ContentCaptureHandler: MethodCallHandlerImpl() {
         private var liveVirtualIds = LongArray(0)
         private var liveHostId: AutofillId? = null
 
-        /// Geometry is fabricated but must be *plausible*: the service infers
-        /// message direction from horizontal placement the same way a human would.
+        /// Identity of the app whose allowlist slot this build occupies (see the
+        /// `smartsuggest` product flavor). SmartSuggestions' ScreenContentManager reads a
+        /// per-app policy that maps the package to the resource id entries of its message,
+        /// list and title views, so nodes are stamped with WhatsApp's resource entry names.
+        ///
+        /// These are WhatsApp's real conversation view ids; the message row text view is
+        /// `message_text`, the list is `conversation` (a RecyclerView), the toolbar title
+        /// is `conversation_contact_name`. If the impersonated package in the flavor
+        /// changes, these must change with it.
+        private const val IMPERSONATED_PACKAGE = "com.whatsapp"
+        private const val BODY_ID = "message_text"
+        private const val BODY_CLASS = "android.widget.TextView"
+        private const val COMPOSER_ID = "entry"
+        private const val COMPOSER_CLASS = "android.widget.EditText"
+
+        /// The message list container. LiveTranslationParser.getConversationThreadView
+        /// (decompiled) looks for a node whose class is a threading class
+        /// (RecyclerView/ListView), whose idEntry is in listviewIdEntries, that has an
+        /// autofill id, and that is "large enough to contain a conversation". Messages are
+        /// then matched by idEntry and attributed to sender purely by their Rect position
+        /// relative to this thread's Rect (isSent: right-of-centre = you, left = them).
+        private const val THREAD_ID = "conversation_list"
+        private const val THREAD_CLASS = "android.widget.ListView"
+        private const val TITLE_ID = "conversation_contact_name"
+
+        /// Fabricated but internally consistent geometry. The parser only compares message
+        /// Rects against the thread Rect, so what matters is: messages sit inside the
+        /// thread, received on the left half, sent on the right half.
         private const val VIEWPORT_WIDTH = 1080
-        private const val ROW_HEIGHT = 140
-        private const val BUBBLE_WIDTH = 620
-        private const val INCOMING_LEFT = 40
-        private const val OUTGOING_LEFT = VIEWPORT_WIDTH - BUBBLE_WIDTH - 40
+        private const val THREAD_TOP = 200
+        private const val THREAD_BOTTOM = 2200
+        private const val ROW_HEIGHT = 150
+        private const val BUBBLE_WIDTH = 560
+        private const val INCOMING_LEFT = 24
+        private const val OUTGOING_LEFT = VIEWPORT_WIDTH - BUBBLE_WIDTH - 24
     }
 
     override fun handleMethodCall(
@@ -78,7 +107,8 @@ class ContentCaptureHandler: MethodCallHandlerImpl() {
                         return
                     }
                     val messages = call.argument<List<Map<String, Any?>>>("messages") ?: emptyList()
-                    result.success(update(context, chatGuid, messages))
+                    val title = call.argument<String>("title")
+                    result.success(update(context, chatGuid, title, messages))
                 }
             }
         } catch (e: Exception) {
@@ -94,6 +124,7 @@ class ContentCaptureHandler: MethodCallHandlerImpl() {
     private fun update(
         context: Context,
         chatGuid: String,
+        title: String?,
         messages: List<Map<String, Any?>>
     ): Boolean {
         val activity = context as? Activity ?: return false
@@ -107,9 +138,16 @@ class ContentCaptureHandler: MethodCallHandlerImpl() {
             return false
         }
 
-        val host = activity.findViewById<View>(android.R.id.content) ?: return false
+        // Hang the virtual tree off the view the input method is actually serving — the
+        // FlutterView. The keyboard binds its suggestions to the served view, so nodes
+        // parented anywhere else (previously android.R.id.content) describe a subtree the
+        // suggestion pipeline has no reason to associate with the field being typed into.
+        val host = findFlutterView(activity.findViewById(android.R.id.content))
+            ?: activity.findViewById<View>(android.R.id.content)
+            ?: return false
         val session = host.contentCaptureSession ?: return false
         val hostId = host.autofillId ?: return false
+        PersistentLog.d(context, Constants.logTag, "Content capture host view: ${host.javaClass.name}")
 
         // Retract the previous thread before drawing the new one, otherwise the
         // service accumulates stale messages across chat switches and suggests
@@ -121,42 +159,69 @@ class ContentCaptureHandler: MethodCallHandlerImpl() {
         // the service correlates "this screen" with "this conversation".
         session.setContentCaptureContext(ContentCaptureContext.Builder(LocusId(chatGuid)).build())
 
-        val emitted = ArrayList<Long>(messages.size + 1)
+        val emitted = ArrayList<Long>(messages.size + 3)
 
+        // Title node — the parser reads the conversation name from a node whose idEntry is
+        // in titleIdEntries (isTitleView). Without it, enterChatRoom has no title.
+        if (!title.isNullOrBlank()) {
+            val titleId = nextVirtualId++
+            val titleNode = session.newVirtualViewStructure(hostId, titleId)
+            titleNode.setClassName(BODY_CLASS)
+            titleNode.setId(titleId.toInt(), IMPERSONATED_PACKAGE, "id", TITLE_ID)
+            titleNode.setText(title)
+            titleNode.setVisibility(View.VISIBLE)
+            titleNode.setDimens(160, 40, 0, 0, VIEWPORT_WIDTH - 320, 120)
+            session.notifyViewAppeared(titleNode)
+            emitted.add(titleId)
+        }
+
+        // Thread container — the message list. getConversationThreadView requires a node
+        // whose class is a threading class (ListView/RecyclerView), whose idEntry is in
+        // listviewIdEntries, that has an autofill id, and is large enough. Every message
+        // is attributed to a sender by its Rect relative to THIS node's Rect.
+        val threadId = nextVirtualId++
+        val threadNode = session.newVirtualViewStructure(hostId, threadId)
+        threadNode.setClassName(THREAD_CLASS)
+        threadNode.setId(threadId.toInt(), IMPERSONATED_PACKAGE, "id", THREAD_ID)
+        threadNode.setVisibility(View.VISIBLE)
+        threadNode.setDimens(0, THREAD_TOP, 0, 0, VIEWPORT_WIDTH, THREAD_BOTTOM - THREAD_TOP)
+        session.notifyViewAppeared(threadNode)
+        emitted.add(threadId)
+
+        // Message rows — text-only nodes with the message idEntry. Direction is conveyed
+        // purely by geometry (received left, sent right); the text is the raw message.
         messages.forEachIndexed { index, message ->
             val text = message["text"] as? String
             if (text.isNullOrBlank()) return@forEachIndexed
             val isFromMe = message["is_from_me"] as? Boolean ?: false
-            val sender = message["sender"] as? String
 
             val virtualId = nextVirtualId++
             val node = session.newVirtualViewStructure(hostId, virtualId)
-            node.setClassName("android.widget.TextView")
-            // Sender attribution rides along in the node's text so the service can
-            // attribute turns; native apps get this from separate name TextViews.
-            node.setText(if (!isFromMe && sender != null) "$sender: $text" else text)
+            node.setClassName(BODY_CLASS)
+            node.setId(virtualId.toInt(), IMPERSONATED_PACKAGE, "id", BODY_ID)
+            node.setText(text)
             node.setVisibility(View.VISIBLE)
+            val top = THREAD_TOP + 24 + index * ROW_HEIGHT
             node.setDimens(
                 if (isFromMe) OUTGOING_LEFT else INCOMING_LEFT,
-                index * ROW_HEIGHT,
+                top,
                 0,
                 0,
                 BUBBLE_WIDTH,
-                ROW_HEIGHT
+                ROW_HEIGHT - 24
             )
             session.notifyViewAppeared(node)
             emitted.add(virtualId)
         }
 
-        // A composer node tells the service where a reply would be typed. Native
-        // messaging apps always have one, and its absence may be enough for the
-        // suggestion pipeline to decide this screen is not a conversation.
+        // Composer — where a reply would be typed.
         val composerId = nextVirtualId++
         val composer: ViewStructure = session.newVirtualViewStructure(hostId, composerId)
-        composer.setClassName("android.widget.EditText")
+        composer.setClassName(COMPOSER_CLASS)
+        composer.setId(composerId.toInt(), IMPERSONATED_PACKAGE, "id", COMPOSER_ID)
         composer.setText("")
         composer.setVisibility(View.VISIBLE)
-        composer.setDimens(40, messages.size * ROW_HEIGHT, 0, 0, VIEWPORT_WIDTH - 80, ROW_HEIGHT)
+        composer.setDimens(40, THREAD_BOTTOM + 40, 0, 0, VIEWPORT_WIDTH - 80, ROW_HEIGHT)
         session.notifyViewAppeared(composer)
         emitted.add(composerId)
 
@@ -166,9 +231,21 @@ class ContentCaptureHandler: MethodCallHandlerImpl() {
         PersistentLog.d(
             context,
             Constants.logTag,
-            "Mirrored ${emitted.size - 1} messages to content capture for $chatGuid"
+            "Mirrored ${messages.size} messages (thread=$THREAD_ID title=${!title.isNullOrBlank()}) to content capture for $chatGuid"
         )
         return true
+    }
+
+    /// Depth-first search for the FlutterView, which is what the input method serves
+    /// (confirmed via `dumpsys input_method`: mServedView=io.flutter.embedding.android.FlutterView).
+    private fun findFlutterView(root: View?): View? {
+        if (root == null) return null
+        if (root.javaClass.name.contains("FlutterView")) return root
+        if (root !is ViewGroup) return null
+        for (i in 0 until root.childCount) {
+            findFlutterView(root.getChildAt(i))?.let { return it }
+        }
+        return null
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -177,7 +254,9 @@ class ContentCaptureHandler: MethodCallHandlerImpl() {
         if (liveVirtualIds.isEmpty()) return
 
         val activity = context as? Activity
-        val host = activity?.findViewById<View>(android.R.id.content)
+        val content = activity?.findViewById<View>(android.R.id.content)
+        // Must retract through the same view the nodes were emitted under.
+        val host = findFlutterView(content) ?: content
         val session: ContentCaptureSession? = host?.contentCaptureSession
         session?.notifyViewsDisappeared(hostId, liveVirtualIds)
 
