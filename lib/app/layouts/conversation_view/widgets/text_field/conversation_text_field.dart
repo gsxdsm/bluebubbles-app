@@ -72,6 +72,18 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
 
   final proxyController = TextEditingController();
 
+  // Stable references so these can be removed in dispose(). The focus nodes and text
+  // controllers live on the ConversationViewController, which outlives this widget and
+  // can be reused when the composer is recreated (e.g. the Flutter surface is destroyed
+  // and rebuilt in split-screen). Disposing those nodes here would leave the reused
+  // controller holding a dead FocusNode, so the next composer's initState crashes with
+  // "A FocusNode was used after being disposed." We therefore only add/remove listeners
+  // here and let the controller own their disposal (see ConversationViewController.onClose).
+  void _focusNodeListener() => focusListener(false);
+  void _subjectFocusNodeListener() => focusListener(true);
+  void _textControllerListener() => textListener(false);
+  void _subjectTextControllerListener() => textListener(true);
+
   @override
   void initState() {
     super.initState();
@@ -95,11 +107,11 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
       _autoFocusWhenSettled();
     }
 
-    controller.focusNode.addListener(() => focusListener(false));
-    controller.subjectFocusNode.addListener(() => focusListener(true));
+    controller.focusNode.addListener(_focusNodeListener);
+    controller.subjectFocusNode.addListener(_subjectFocusNodeListener);
 
-    controller.textController.addListener(() => textListener(false));
-    controller.subjectTextController.addListener(() => textListener(true));
+    controller.textController.addListener(_textControllerListener);
+    controller.subjectTextController.addListener(_subjectTextControllerListener);
 
     if (kIsDesktop || kIsWeb) {
       proxyController.addListener(() {
@@ -418,10 +430,12 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
     unawaited(ChatsSvc.setChatTextFieldText(chat, draftText));
     unawaited(ChatsSvc.setChatTextFieldAttachments(chat, draftAttachments));
 
-    controller.focusNode.dispose();
-    controller.subjectFocusNode.dispose();
-    controller.textController.dispose();
-    controller.subjectTextController.dispose();
+    // Remove only our listeners — the ConversationViewController owns these nodes and
+    // controllers and disposes them in onClose(). See the field comments above.
+    controller.focusNode.removeListener(_focusNodeListener);
+    controller.subjectFocusNode.removeListener(_subjectFocusNodeListener);
+    controller.textController.removeListener(_textControllerListener);
+    controller.subjectTextController.removeListener(_subjectTextControllerListener);
     recorderController?.dispose();
     _emojiScrollController.dispose();
     controller.showAttachmentPicker.value = false;

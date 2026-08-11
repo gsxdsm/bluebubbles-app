@@ -240,6 +240,14 @@ class ConversationViewController extends StatefulController with GetSingleTicker
       a.player.dispose();
     }
     scrollController.dispose();
+    // These are owned by this controller, not by the composer widget. The composer only
+    // adds/removes listeners; disposing them here (once, when the controller is actually
+    // closed) avoids leaving a reused controller with a dead FocusNode — which crashed a
+    // freshly-mounted composer with "A FocusNode was used after being disposed."
+    focusNode.dispose();
+    subjectFocusNode.dispose();
+    textController.dispose();
+    subjectTextController.dispose();
     super.onClose();
   }
 
