@@ -55,6 +55,12 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
   /// different chat is viewed, so returning to a chat later re-opens as expected.
   static String? _lastAutoFocusedChatGuid;
 
+  /// Set the first time any composer runs its keyboard retry — a proxy for "how long ago
+  /// this process launched." A shortcut that opens straight into a chat hits this while the
+  /// engine is still restarting its input connection, so those opens get a longer retry
+  /// window (see [_ensureKeyboardShown]).
+  static DateTime? _firstKeyboardAttemptAt;
+
   final recorderController = kIsWeb ? null : RecorderController();
   final localController = ConversationTextFieldLocalController();
   final _emojiScrollController = ScrollController();
@@ -384,16 +390,25 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
   /// re-creates its input connection several times, and a request that lands in one of
   /// those gaps is dropped without any error. So retry briefly — but only briefly.
   ///
-  /// The retry window MUST stay short. In split-screen / multi-window (common on the
-  /// Fold) the IME doesn't resize this window, so neither `viewInsets.bottom` nor
+  /// The window is short for warm opens and longer for cold (just-launched) opens.
+  ///
+  /// Why short by default: in split-screen / multi-window (common on the Fold) the IME
+  /// doesn't resize this window, so neither `viewInsets.bottom` nor
   /// `KeyboardVisibilityController` ever report the keyboard as visible — the loop can't
-  /// detect success and would run to its full length. Every `TextInput.show` it fires
-  /// after the user has dismissed the keyboard re-raises it, so a long loop makes Back
-  /// appear broken (dismiss → instantly pops back up). Keeping the window to ~1s means
-  /// the retries finish before the user reads and dismisses, so a dismissal sticks.
+  /// detect success. Every `TextInput.show` it fires after the user has dismissed the
+  /// keyboard re-raises it, so a long loop there makes Back appear broken (dismiss →
+  /// instantly pops back up). A ~1s window finishes before the user reads and dismisses.
+  ///
+  /// Why longer when cold: a shortcut that launches straight into a chat races the engine's
+  /// input-connection churn, which lasts longer than 1s, so a short window often misses and
+  /// the keyboard never appears. A cold open is fullscreen (it resizes), so the loop DOES
+  /// get a visibility signal and exits the moment the keyboard is up — a longer window there
+  /// doesn't fight a dismissal. The extra time only applies right after launch.
   Future<void> _ensureKeyboardShown() async {
     const interval = Duration(milliseconds: 250);
-    const maxAttempts = 4; // ~1s — long enough for cold-start churn, short enough not to fight a dismiss
+    _firstKeyboardAttemptAt ??= DateTime.now();
+    final coldStart = DateTime.now().difference(_firstKeyboardAttemptAt!) < const Duration(seconds: 8);
+    final maxAttempts = coldStart ? 20 : 4; // ~5s cold (outlast startup churn), ~1s warm
 
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       await Future.delayed(interval);
