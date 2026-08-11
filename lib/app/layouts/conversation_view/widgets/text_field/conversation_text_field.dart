@@ -378,6 +378,15 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
   /// already-open conversation, where this widget is never rebuilt.
   void focusComposerAndShowKeyboard() {
     if (!mounted) return;
+    // This is an explicit request to raise the keyboard for the foreground chat (entry
+    // auto-open, re-open from a shortcut, or resume). Clear any stale overlay/sub-route
+    // flags first: they live on the ConversationViewController, which is reused across
+    // opens, and a value left set by a picker or a details route whose cleanup was skipped
+    // would make _ensureKeyboardShown bail immediately so the keyboard never appears — the
+    // "works a few times then stops" failure. A genuine overlay opened mid-retry still
+    // stops the loop, because it re-sets the flag and the loop re-checks each attempt.
+    controller.showingOverlays = false;
+    controller.showingSubRoute = false;
     _lastAutoFocusedChatGuid = chatGuid;
     controller.focusNode.requestFocus();
     unawaited(_ensureKeyboardShown());
