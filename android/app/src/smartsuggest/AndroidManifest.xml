@@ -39,6 +39,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The system only reads share-target declarations from the launcher
+                 activity's shortcuts meta-data. The base manifest attaches it to
+                 MainActivity, which is no longer the launcher in this flavor, so
+                 without this the pushed conversation shortcuts never surface as
+                 direct share targets. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Strip the launcher entry from the original activity so there is a single icon
